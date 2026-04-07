@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 import os
 
-st.set_page_config(page_title="Grade Predictor", page_icon="🎓", layout="centered")
+st.set_page_config(page_title="Performance Predictor", page_icon="🎓", layout="centered")
 
 st.markdown("""
 <style>
@@ -21,17 +21,17 @@ div[data-testid="stButton"] > button:hover { background: #3a3628; }
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.title("🎓 Grade Predictor")
+st.title("🎓 Performance Predictor")
 st.caption("Enter student details to get predictions from all trained models with confidence scores.")
 st.divider()
 
 # ── Load artefacts ────────────────────────────────────────────────────────────
 MODEL_FILES = {
-    "Logistic Regression":  "logisticregression.pkl",
-    "K-Nearest Neighbours": "knn.pkl",
-    "Decision Tree":        "decisiontree.pkl",
-    "SVM":                  "svm.pkl",
-    "Naïve Bayes":          "naivebayes.pkl",
+    "LogisticRegression": "logisticregression.pkl",
+    "KNN":                "knn.pkl",
+    "DecisionTree":       "decisiontree.pkl",
+    "SVM":                "svm.pkl",
+    "NaiveBayes":         "naivebayes.pkl",
 }
 ARTEFACTS = ["sc.pkl", "selector.pkl", "label_encoders.pkl", "feature_names.pkl"]
 missing   = [f for f in ARTEFACTS + list(MODEL_FILES.values()) if not os.path.exists(f)]
@@ -40,20 +40,33 @@ if missing:
     st.warning(f"Missing file(s): {', '.join(missing)}. Run main.py first to generate all .pkl files.")
     st.stop()
 
-sc             = joblib.load("sc.pkl")
-selector       = joblib.load("selector.pkl")
-label_encoders = joblib.load("label_encoders.pkl")
-feature_names  = joblib.load("feature_names.pkl")
+sc            = joblib.load("sc.pkl")
+selectors     = joblib.load("selector.pkl")       # dict: {model_name: selector}
+le            = joblib.load("label_encoders.pkl")  # single LabelEncoder for final_result
+feature_names = joblib.load("feature_names.pkl")  # all columns including final_result
 
-grade_encoder    = label_encoders.get("Grade")
-input_features   = [c for c in feature_names if c != "Grade"]
+# Input features = all columns except the target
+input_features = [c for c in feature_names if c != "final_result"]
 
-# Force Age and Study Hours to be treated as numerical even if they are in the old label_encoders
-categorical_cols = [c for c in label_encoders if c not in ["Grade", "Student_Age", "Weekly_Study_Hours"]]
-models           = {name: joblib.load(path) for name, path in MODEL_FILES.items()}
+models = {name: joblib.load(path) for name, path in MODEL_FILES.items()}
 
 # ── Input form ────────────────────────────────────────────────────────────────
 st.subheader("Student Information")
+
+# Define exact bounds based on the training data to prevent Outlier Panic
+# Format: "column_name": (min_value, max_value, default_value)
+FEATURE_LIMITS = {
+    "study_hours": (1.0, 10.0, 5.0),
+    "attendance": (40.0, 100.0, 75.0),
+    "sleep_hours": (4.0, 9.0, 7.0),
+    "assignments_completed": (0.0, 10.0, 5.0),
+    "internet_usage": (1.0, 8.0, 4.0),
+    "previous_grade": (30.0, 100.0, 70.0),
+    "participation": (1.0, 10.0, 5.0),
+    "mock_test_score": (20.0, 100.0, 60.0),
+    "class_interaction": (1.0, 10.0, 5.0),
+    "extra_classes_attended": (0.0, 10.0, 2.0),
+}
 
 user_input = {}
 pairs = [input_features[i:i+2] for i in range(0, len(input_features), 2)]
@@ -64,40 +77,37 @@ for pair in pairs:
         with widget_col:
             label = col_name.replace("_", " ").title()
             
-            # Explicitly handle Age and Study Hours as numeric inputs
-            if col_name == "Student_Age":
-                user_input[col_name] = st.number_input(label, min_value=10.0, max_value=100.0, value=20.0, step=1.0)
-            elif col_name == "Weekly_Study_Hours":
-                user_input[col_name] = st.number_input(label, min_value=0.0, max_value=168.0, value=10.0, step=1.0)
-            elif col_name in categorical_cols:
-                classes = list(label_encoders[col_name].classes_)
-                user_input[col_name] = st.selectbox(label, classes)
-            else:
-                user_input[col_name] = st.number_input(label, value=0.0, step=1.0, format="%.2f")
+            # Fetch the specific limits for this feature, or use a safe fallback
+            min_val, max_val, default_val = FEATURE_LIMITS.get(col_name, (0.0, 100.0, 0.0))
+            
+            # Render the number input with the strict limits applied
+            user_input[col_name] = st.number_input(
+                label, 
+                min_value=float(min_val), 
+                max_value=float(max_val), 
+                value=float(default_val), 
+                step=1.0, 
+                format="%.2f",
+                help=f"Allowed range: {min_val} to {max_val}" # Adds a helpful tooltip for the user!
+            )
 
 st.divider()
 
 # ── Predict ───────────────────────────────────────────────────────────────────
 if st.button("Predict Grade — All Models"):
 
-    # Encode input
-    row_dict = {}
-    for col_name in input_features:
-        val = user_input[col_name]
-        if col_name in categorical_cols:
-            row_dict[col_name] = label_encoders[col_name].transform([val])[0]
-        else:
-            row_dict[col_name] = float(val)
-
-    row_df       = pd.DataFrame([row_dict], columns=input_features)
-    row_scaled   = sc.transform(row_df)
-    row_selected = selector.transform(row_scaled)
+    # Build input row (all numeric)
+    row_dict = {col: float(user_input[col]) for col in input_features}
+    row_df     = pd.DataFrame([row_dict], columns=input_features)
+    row_scaled = sc.transform(row_df)
 
     # Run all models
     rows = []
     for model_name, model in models.items():
-        pred_enc = model.predict(row_selected)[0]
-        grade    = grade_encoder.inverse_transform([int(pred_enc)])[0] if grade_encoder else str(pred_enc)
+        row_selected = selectors[model_name].transform(row_scaled)
+        pred_enc     = model.predict(row_selected)[0]
+        # Decode label back to original class name
+        grade        = le.inverse_transform([int(pred_enc)])[0]
 
         if hasattr(model, "predict_proba"):
             confidence = model.predict_proba(row_selected)[0].max()
@@ -120,7 +130,6 @@ if st.button("Predict Grade — All Models"):
         is_winner  = rank == 1
         conf       = r["Confidence"]
         conf_label = f"{conf:.1%}" if conf is not None else "N/A"
-        crown      = " 👑" if is_winner else f"  #{rank}"
 
         with st.container():
             col_rank, col_model, col_grade, col_conf = st.columns([0.5, 2.5, 1, 2])
@@ -149,17 +158,37 @@ if st.button("Predict Grade — All Models"):
         if rank < len(rows):
             st.markdown("<hr style='margin:4px 0; border-color:#e8e3d8;'>", unsafe_allow_html=True)
 
-    # ── Agreement summary ─────────────────────────────────────────────────────
+    # ── Agreement summary (Performance-Weighted Soft Voting) ──────────────────
     st.divider()
-    all_grades = [r["Grade"] for r in rows]
-    unique     = set(all_grades)
+
+    ALLOWED_MODELS = ["LogisticRegression", "SVM", "NaiveBayes", "DecisionTree", "KNN"]
+
+    MODEL_WEIGHTS = {
+        "LogisticRegression": 0.8,
+        "KNN":                0.75,
+        "DecisionTree":       0.6,
+        "SVM":                0.7,
+        "NaiveBayes":         0.75,
+    }
+
+    grade_scores = {}
+    voting_rows  = [r for r in rows if r["Model"] in ALLOWED_MODELS]
+
+    for r in voting_rows:
+        grade          = r["Grade"]
+        base_confidence = r["Confidence"] if r["Confidence"] is not None else 1.0
+        trust_weight   = MODEL_WEIGHTS.get(r["Model"], 1.0)
+        weighted_score = base_confidence * trust_weight
+        grade_scores[grade] = grade_scores.get(grade, 0.0) + weighted_score
+
+    final_grade   = max(grade_scores, key=grade_scores.get)
+    voting_grades = [r["Grade"] for r in voting_rows]
+    unique        = set(voting_grades)
 
     if len(unique) == 1:
-        st.success(f"Final Predicted Grade: **{all_grades[0]}**.")
+        st.success(f"Final Predicted Grade: **{final_grade}** — All models agree ✅")
     else:
-        majority = max(unique, key=all_grades.count)
-        count    = all_grades.count(majority)
-        st.warning(f"Final Predicted Grade: **{majority}**.")
+        st.warning(f"Final Predicted Grade: **{final_grade}** — Models disagreed; selected by weighted confidence.")
 
     # ── Summary dataframe ─────────────────────────────────────────────────────
     with st.expander("View full results table"):
