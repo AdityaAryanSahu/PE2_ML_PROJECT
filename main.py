@@ -142,13 +142,12 @@ print(results_df)
 
 comparison()
 
-print("\n--- Final Re-Evaluation ---")
+print("re-evaluation")
 for i, row in results_df.iterrows():
     name = row['Model']
     model = row['Model_Object']
-    selector = row['Selector_Object'] # Retrieve the EXACT selector used for this model
+    selector = row['Selector_Object']
     
-    # Transform test data using the saved selector, guaranteeing the same columns!
     x_test_final = selector.transform(X_test_scaled)
     
     y_pred = model.predict(x_test_final)
