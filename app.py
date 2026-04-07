@@ -21,7 +21,7 @@ div[data-testid="stButton"] > button:hover { background: #3a3628; }
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
-st.title("🎓 Performance Predictor")
+st.title(" Performance Predictor")
 st.caption("Enter student details to get predictions from all trained models with confidence scores.")
 st.divider()
 
@@ -139,7 +139,7 @@ if st.button("Predict Grade — All Models"):
 
             with col_model:
                 if is_winner:
-                    st.markdown(f"**{r['Model']} 👑**")
+                    st.markdown(f"{r['Model']} ")
                 else:
                     st.markdown(r["Model"])
 
@@ -186,7 +186,7 @@ if st.button("Predict Grade — All Models"):
     unique        = set(voting_grades)
 
     if len(unique) == 1:
-        st.success(f"Final Predicted Grade: **{final_grade}** — All models agree ✅")
+        st.success(f"Final Predicted Grade: **{final_grade}** — All models agree ")
     else:
         st.warning(f"Final Predicted Grade: **{final_grade}** — Models disagreed; selected by weighted confidence.")
 
